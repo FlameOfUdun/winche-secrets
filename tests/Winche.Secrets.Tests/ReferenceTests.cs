@@ -124,6 +124,8 @@ public class ReferenceTests(PostgresFixture pg)
         Assert.Contains("isn't JSON", (await Assert.ThrowsAsync<SecretReferenceException>(() => secrets.GetAsync("x.notjson"))).Message);
 
         Assert.Equal(new SecretTestResult(true, null), await secrets.TestAsync(SecretReference.Parse("fake:/t/json#a"), true));
+        Assert.Equal("1", await secrets.ReadReferenceAsync(SecretReference.Parse("fake:/t/json#a"), true));
+        Assert.Equal("permission-denied", (await Assert.ThrowsAsync<SecretReferenceException>(() => secrets.ReadReferenceAsync(SecretReference.Parse("fake:/t/json"), false))).Code);
         Assert.False((await secrets.TestAsync(SecretReference.Parse("fake:/nothing"), true)).Ok);
         Assert.Equal("not-found", (await secrets.TestAsync("x.never")).Code);
         Assert.False((await secrets.TestAsync("x.missing")).Ok);

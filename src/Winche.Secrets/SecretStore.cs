@@ -243,6 +243,17 @@ public sealed class SecretStore
         catch (SecretReferenceException e) { return new SecretTestResult(false, e.Message, e.Code); }
     }
 
+    /// <summary>
+    /// The value <paramref name="reference"/> reads now (no cache), for server code trying something before it's saved
+    /// (a bucket's key, before moving files there); with the app's credentials only if <paramref name="allowAppCredentials"/>.
+    /// Throws <see cref="SecretReferenceException"/> with the reason. Never hand it to a console or client.
+    /// </summary>
+    public async Task<string> ReadReferenceAsync(SecretReference reference, bool allowAppCredentials, CancellationToken ct = default)
+    {
+        await CheckAsync(reference, allowAppCredentials, ct);
+        return await ReadAsync(reference, allowAppCredentials, null, ct);
+    }
+
     /// <summary>Reads the secret <paramref name="name"/> now (no cache): whether it works. Values kept here always do.</summary>
     public async Task<SecretTestResult> TestAsync(string name, CancellationToken ct = default)
     {
