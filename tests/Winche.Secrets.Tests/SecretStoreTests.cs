@@ -40,10 +40,15 @@ public class SecretStoreTests(PostgresFixture pg)
     }
 
     [Fact]
-    public void Secrets_need_the_settings_database()
+    public async Task Without_the_settings_database_nothing_is_set_and_nothing_can_be_saved()
     {
-        var sp = new ServiceCollection().AddWincheSecrets().BuildServiceProvider();
-        var e = Assert.Throws<InvalidOperationException>(() => sp.GetRequiredService<SecretStore>());
+        var sp = new ServiceCollection().AddLogging().AddWincheSecrets().BuildServiceProvider();
+        foreach (var h in sp.GetServices<IHostedService>()) await h.StartAsync(default);
+        var secrets = sp.GetRequiredService<SecretStore>();
+        Assert.False(secrets.Available);
+        Assert.Null(await secrets.GetAsync("smtp.password"));
+        Assert.Empty(await secrets.ListAsync(""));
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() => secrets.SetAsync("smtp.password", "x", null));
         Assert.Contains("AddWincheConfig", e.Message);
     }
 

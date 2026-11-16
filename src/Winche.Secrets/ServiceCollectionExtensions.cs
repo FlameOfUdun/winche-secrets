@@ -11,18 +11,16 @@ public static class SecretsServiceCollectionExtensions
 {
     /// <summary>
     /// Adds the secret store (<see cref="SecretStore"/>): secrets encrypted with the master key, in the database
-    /// <c>AddWincheConfig</c> names (table <c>winche_secrets</c>). Call it after <c>AddWincheConfig</c>; packages that keep
-    /// secrets (sign-in, storage locations, functions, webhooks) find it here. Safe to call more than once.
+    /// <c>AddWincheConfig</c> names (table <c>winche_secrets</c>). Packages that keep secrets (sign-in, storage locations,
+    /// functions, webhooks) call it themselves; calling it again does nothing. Without <c>AddWincheConfig</c> the store
+    /// is there but unavailable (<see cref="SecretStore.Available"/> false: nothing is set, nothing can be saved).
     /// </summary>
     public static IServiceCollection AddWincheSecrets(this IServiceCollection services)
     {
         if (services.Any(d => d.ServiceType == typeof(SecretStore))) return services;
-        services.AddSingleton(sp =>
-        {
-            var config = sp.GetService<WincheConfigOptions>()
-                ?? throw new InvalidOperationException("Winche.Secrets keeps secrets where Winche.Core keeps settings: call AddWincheConfig first.");
-            return new SecretStore(sp.GetRequiredKeyedService<NpgsqlDataSource>(nameof(WincheConfigOptions)), config.MasterKey, config.PreviousMasterKeys);
-        });
+        services.AddSingleton(sp => sp.GetService<WincheConfigOptions>() is { } config
+            ? new SecretStore(sp.GetRequiredKeyedService<NpgsqlDataSource>(nameof(WincheConfigOptions)), config.MasterKey, config.PreviousMasterKeys)
+            : new SecretStore(null, null));
         services.AddHostedService<SecretsStartup>();
         return services;
     }
@@ -45,8 +43,9 @@ internal sealed class SecretsStartup(SecretStore secrets, IServiceProvider servi
 
     public async Task StartAsync(CancellationToken ct)
     {
+        if (services.GetService<WincheConfigOptions>() is not { } config) return;   // no settings database: nothing to keep
         await WincheSchema.EnsureAsync(services.GetRequiredKeyedService<NpgsqlDataSource>(nameof(WincheConfigOptions)), "secrets", Steps, ct);
-        if (services.GetRequiredService<WincheConfigOptions>().PreviousMasterKeys.Count > 0)
+        if (config.PreviousMasterKeys.Count > 0)
         {
             var moved = await secrets.ReencryptAsync(ct);
             if (moved.Reencrypted > 0) logger.LogInformation("Re-encrypted {Count} secrets with the current master key.", moved.Reencrypted);

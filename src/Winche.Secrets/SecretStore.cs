@@ -17,11 +17,11 @@ public sealed record SecretKeyStatus(int Reencrypted, int Current, int Unreadabl
 /// </summary>
 public sealed class SecretStore
 {
-    private readonly NpgsqlDataSource _db;
+    private readonly NpgsqlDataSource? _db;
     private readonly byte[]? _key;
     private readonly byte[][] _previous;
 
-    internal SecretStore(NpgsqlDataSource db, string? masterKey, IReadOnlyList<string>? previousKeys = null)
+    internal SecretStore(NpgsqlDataSource? db, string? masterKey, IReadOnlyList<string>? previousKeys = null)
     {
         _db = db;
         _key = masterKey is null ? null : KeyFrom(masterKey);
@@ -51,14 +51,17 @@ public sealed class SecretStore
         return Encoding.UTF8.GetString(plain);
     }
 
-    /// <summary>Whether a master key is set (without one, secrets can't be saved).</summary>
-    public bool Available => _key is not null;
+    /// <summary>Whether secrets can be kept: Winche.Core's settings database and a master key (AddWincheConfig).</summary>
+    public bool Available => _db is not null && _key is not null;
+
+    private const string NoDatabase = "Secrets are kept where Winche.Core keeps settings: call AddWincheConfig (with a master key).";
+    private NpgsqlDataSource Db => _db ?? throw new InvalidOperationException(NoDatabase);
 
     public async Task SetAsync(string name, string value, string? by, CancellationToken ct = default)
     {
-        var key = _key ?? throw new InvalidOperationException("Secrets need a master key: set WincheConfigOptions.MasterKey (Winche.Core) (32+ characters, from configuration).");
+        var key = _key ?? throw new InvalidOperationException(_db is null ? NoDatabase : "Secrets need a master key: set WincheConfigOptions.MasterKey (Winche.Core; 32+ characters, from configuration).");
         if (string.IsNullOrEmpty(value)) throw new ArgumentException("A secret can't be empty.", nameof(value));
-        await using var cmd = _db.CreateCommand("""
+        await using var cmd = Db.CreateCommand("""
             INSERT INTO winche_secrets (name, ciphertext, set_at, set_by) VALUES (@name, @c, now(), @by)
             ON CONFLICT (name) DO UPDATE SET ciphertext = excluded.ciphertext, set_at = excluded.set_at, set_by = excluded.set_by
             """);
@@ -71,7 +74,8 @@ public sealed class SecretStore
     /// <summary>The secret's value, for server code that uses it. Null when it isn't set.</summary>
     public async Task<string?> GetAsync(string name, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand("SELECT ciphertext FROM winche_secrets WHERE name = @name");
+        if (_db is null) return null;
+        await using var cmd = Db.CreateCommand("SELECT ciphertext FROM winche_secrets WHERE name = @name");
         cmd.Parameters.AddWithValue("name", name);
         if (await cmd.ExecuteScalarAsync(ct) is not byte[] stored) return null;
         var key = _key ?? throw new InvalidOperationException("Secrets need a master key: set WincheConfigOptions.MasterKey (Winche.Core).");
@@ -89,7 +93,7 @@ public sealed class SecretStore
     {
         var key = _key ?? throw new InvalidOperationException("Secrets need a master key: set WincheConfigOptions.MasterKey (Winche.Core).");
         var rows = new List<(string Name, byte[] Stored)>();
-        await using (var read = _db.CreateCommand("SELECT name, ciphertext FROM winche_secrets"))
+        await using (var read = Db.CreateCommand("SELECT name, ciphertext FROM winche_secrets"))
         await using (var r = await read.ExecuteReaderAsync(ct))
             while (await r.ReadAsync(ct)) rows.Add((r.GetString(0), (byte[])r[1]));
         int moved = 0, current = 0, unreadable = 0;
@@ -99,7 +103,7 @@ public sealed class SecretStore
             var value = _previous.Select(p => Open(p, name, stored)).FirstOrDefault(v => v is not null);
             if (value is null) { unreadable++; continue; }
             // Only if nobody changed it meanwhile (another server, or the console).
-            await using var write = _db.CreateCommand("UPDATE winche_secrets SET ciphertext = @new WHERE name = @name AND ciphertext = @old");
+            await using var write = Db.CreateCommand("UPDATE winche_secrets SET ciphertext = @new WHERE name = @name AND ciphertext = @old");
             write.Parameters.AddWithValue("new", Seal(key, name, value));
             write.Parameters.AddWithValue("name", name);
             write.Parameters.AddWithValue("old", stored);
@@ -111,7 +115,8 @@ public sealed class SecretStore
     /// <summary>The secrets whose names start with <paramref name="prefix"/> (when and by whom each was set, never values), by name.</summary>
     public async Task<IReadOnlyList<SecretInfo>> ListAsync(string prefix, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand("SELECT name, set_at, set_by FROM winche_secrets WHERE starts_with(name, @prefix) ORDER BY name COLLATE \"C\"");
+        if (_db is null) return [];
+        await using var cmd = Db.CreateCommand("SELECT name, set_at, set_by FROM winche_secrets WHERE starts_with(name, @prefix) ORDER BY name COLLATE \"C\"");
         cmd.Parameters.AddWithValue("prefix", prefix);
         var list = new List<SecretInfo>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -122,7 +127,8 @@ public sealed class SecretStore
 
     public async Task<SecretInfo?> InfoAsync(string name, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand("SELECT set_at, set_by FROM winche_secrets WHERE name = @name");
+        if (_db is null) return null;
+        await using var cmd = Db.CreateCommand("SELECT set_at, set_by FROM winche_secrets WHERE name = @name");
         cmd.Parameters.AddWithValue("name", name);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct)
@@ -132,7 +138,8 @@ public sealed class SecretStore
 
     public async Task<bool> DeleteAsync(string name, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand("DELETE FROM winche_secrets WHERE name = @name");
+        if (_db is null) return false;
+        await using var cmd = Db.CreateCommand("DELETE FROM winche_secrets WHERE name = @name");
         cmd.Parameters.AddWithValue("name", name);
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }

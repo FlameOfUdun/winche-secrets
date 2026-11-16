@@ -7,7 +7,7 @@ remove them; only server code that needs one reads it back.
 
 ```csharp
 builder.Services.AddWincheConfig(o => { o.ConnectionString = conn; o.MasterKey = config["Winche:MasterKey"]; });
-builder.Services.AddWincheSecrets();
+builder.Services.AddWincheSecrets();   // packages that keep secrets add it themselves too
 ```
 
 Changing the master key: deploy the new one as `MasterKey` and the old one in `PreviousMasterKeys`; on start every
