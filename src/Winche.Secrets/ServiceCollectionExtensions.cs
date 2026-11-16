@@ -15,7 +15,11 @@ public static class SecretsServiceCollectionExtensions
     /// functions, webhooks) call it themselves; calling it again does nothing. Without <c>AddWincheConfig</c> the store
     /// is there but unavailable (<see cref="SecretStore.Available"/> false: nothing is set, nothing can be saved).
     /// </summary>
-    public static IServiceCollection AddWincheSecrets(this IServiceCollection services, Action<WincheSecretsOptions>? configure = null)
+    public static IServiceCollection AddWincheSecrets(this IServiceCollection services) => services.AddWincheSecrets(null!);
+
+    /// <inheritdoc cref="AddWincheSecrets(IServiceCollection)"/>
+    /// <param name="configure">Options (how long values read through references are kept), applied whichever call added the store.</param>
+    public static IServiceCollection AddWincheSecrets(this IServiceCollection services, Action<WincheSecretsOptions> configure)
     {
         var options = services.FirstOrDefault(d => d.ServiceType == typeof(WincheSecretsOptions))?.ImplementationInstance as WincheSecretsOptions;
         if (options is null)
