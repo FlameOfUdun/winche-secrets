@@ -155,3 +155,16 @@ public class ReferenceTests(PostgresFixture pg)
         Assert.Equal("one", await secrets.GetAsync("p.two"));
     }
 }
+
+public class SourceKeyTests
+{
+    [Fact]
+    public void A_source_key_is_checked_and_kept_as_json_of_its_fields()
+    {
+        var key = new SourceKey("secrets.source.x", "X key", [new("id", "Key ID"), new("secret", "Secret", Secret: true), new("region", "Region", Required: false)]);
+        Assert.Equal("X key needs Secret.", key.Problem(new Dictionary<string, string?> { ["id"] = "a" }));
+        Assert.Equal("X key has no field 'other'.", key.Problem(new Dictionary<string, string?> { ["id"] = "a", ["secret"] = "b", ["other"] = "c" }));
+        Assert.Null(key.Problem(new Dictionary<string, string?> { ["id"] = "a", ["secret"] = "b", ["region"] = "" }));
+        Assert.Equal("""{"id":"a","secret":"b"}""", key.ToJson(new Dictionary<string, string?> { ["id"] = " a ", ["secret"] = "b", ["region"] = "" }));
+    }
+}

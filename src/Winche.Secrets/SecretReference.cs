@@ -62,6 +62,13 @@ public interface ISecretSource
     string? Problem(string locator);
 
     /// <summary>
+    /// The project's own key for this source, when it can have one: kept as a value under
+    /// <see cref="SourceKey.SecretName"/> (a JSON object of <see cref="SourceKey.Fields"/>). Sources may share one
+    /// (Secrets Manager and Parameter Store: one AWS key). Null: always the app's credentials.
+    /// </summary>
+    SourceKey? Key => null;
+
+    /// <summary>
     /// Whether reading would use the app's own credentials (its role, its environment) rather than ones the project
     /// keeps itself (<see cref="SecretSourceContext.GetStoredAsync"/>). On a host serving several projects, that lets a
     /// project read whatever the host can: <see cref="SecretStore.SetReferenceAsync"/> refuses it unless allowed.
@@ -71,6 +78,26 @@ public interface ISecretSource
     /// <summary>The value (the whole of it: a JSON field is picked by the store). Throws <see cref="SecretReferenceException"/> with the source's reason.</summary>
     Task<string> ReadAsync(SecretReference reference, SecretSourceContext context, CancellationToken ct);
 }
+
+/// <summary>A key a project keeps for a source (its own AWS access key): what the console asks for.</summary>
+/// <param name="SecretName">Where it's kept (<c>secrets.source.aws</c>), as a JSON object of the fields.</param>
+public sealed record SourceKey(string SecretName, string Title, IReadOnlyList<SourceKeyField> Fields)
+{
+    /// <summary>Why <paramref name="values"/> isn't a key (a required field missing, an unknown one), or null.</summary>
+    public string? Problem(IReadOnlyDictionary<string, string?> values)
+    {
+        if (values.Keys.FirstOrDefault(k => Fields.All(f => f.Name != k)) is { } unknown) return $"{Title} has no field '{unknown}'.";
+        var missing = Fields.Where(f => f.Required && string.IsNullOrWhiteSpace(values.GetValueOrDefault(f.Name))).Select(f => f.Title).ToList();
+        return missing.Count > 0 ? $"{Title} needs {string.Join(" and ", missing)}." : null;
+    }
+
+    /// <summary>The JSON kept for <paramref name="values"/> (blank optional fields left out).</summary>
+    public string ToJson(IReadOnlyDictionary<string, string?> values) => System.Text.Json.JsonSerializer.Serialize(
+        Fields.Where(f => !string.IsNullOrWhiteSpace(values.GetValueOrDefault(f.Name))).ToDictionary(f => f.Name, f => values[f.Name]!.Trim()));
+}
+
+/// <summary>One field of a <see cref="SourceKey"/>; <see cref="Secret"/> ones are typed like passwords.</summary>
+public sealed record SourceKeyField(string Name, string Title, bool Secret = false, bool Required = true, string? Hint = null);
 
 /// <summary>What a source may use while reading: the values the project keeps itself (its own access keys).</summary>
 public sealed class SecretSourceContext(Func<string, CancellationToken, Task<string?>> stored)

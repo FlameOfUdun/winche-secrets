@@ -30,6 +30,14 @@ public sealed record AwsProjectKey(string AccessKeyId, string SecretAccessKey, s
     /// <summary>The secret it's kept under.</summary>
     public const string SecretName = SecretStore.SourcePrefix + "aws";
 
+    /// <summary>What the console asks for.</summary>
+    public static readonly SourceKey Form = new(SecretName, "AWS access key",
+    [
+        new("accessKeyId", "Access key ID"),
+        new("secretAccessKey", "Secret access key", Secret: true),
+        new("region", "Region", Required: false, Hint: "for secrets named without an ARN, e.g. eu-west-2"),
+    ]);
+
     public string ToJson() => JsonSerializer.Serialize(new Dictionary<string, string?> { ["accessKeyId"] = AccessKeyId, ["secretAccessKey"] = SecretAccessKey, ["region"] = Region });
 
     /// <summary>Reads the stored JSON; null (and why) when it isn't a key.</summary>
@@ -118,6 +126,7 @@ public sealed class AwsSecretsManagerSource(AwsSecretsAccess aws) : ISecretSourc
     public string Name => "aws-sm";
     public string Title => "AWS Secrets Manager";
     public string LocatorHint => "a secret's ARN (arn:aws:secretsmanager:<region>:<account>:secret:<name>) or its name";
+    public SourceKey Key => AwsProjectKey.Form;
 
     public string? Problem(string locator) => locator switch
     {
@@ -147,6 +156,7 @@ public sealed class AwsParameterStoreSource(AwsSecretsAccess aws) : ISecretSourc
     public string Name => "aws-ssm";
     public string Title => "AWS Parameter Store";
     public string LocatorHint => "a parameter's name (/app/key) or ARN (arn:aws:ssm:<region>:<account>:parameter/app/key)";
+    public SourceKey Key => AwsProjectKey.Form;
 
     public string? Problem(string locator) => locator switch
     {
