@@ -15,13 +15,32 @@ public static class SecretsServiceCollectionExtensions
     /// functions, webhooks) call it themselves; calling it again does nothing. Without <c>AddWincheConfig</c> the store
     /// is there but unavailable (<see cref="SecretStore.Available"/> false: nothing is set, nothing can be saved).
     /// </summary>
-    public static IServiceCollection AddWincheSecrets(this IServiceCollection services)
+    public static IServiceCollection AddWincheSecrets(this IServiceCollection services, Action<WincheSecretsOptions>? configure = null)
     {
-        if (services.Any(d => d.ServiceType == typeof(SecretStore))) return services;
-        services.AddSingleton(sp => sp.GetService<WincheConfigOptions>() is { } config
-            ? new SecretStore(sp.GetRequiredKeyedService<NpgsqlDataSource>(nameof(WincheConfigOptions)), config.MasterKey, config.PreviousMasterKeys)
-            : new SecretStore(null, null));
-        services.AddHostedService<SecretsStartup>();
+        var options = services.FirstOrDefault(d => d.ServiceType == typeof(WincheSecretsOptions))?.ImplementationInstance as WincheSecretsOptions;
+        if (options is null)
+        {
+            options = new WincheSecretsOptions();
+            services.AddSingleton(options);
+            services.AddSingleton(sp => sp.GetService<WincheConfigOptions>() is { } config
+                ? new SecretStore(sp.GetRequiredKeyedService<NpgsqlDataSource>(nameof(WincheConfigOptions)), config.MasterKey, config.PreviousMasterKeys,
+                    sp.GetServices<ISecretSource>(), options, sp.GetService<TimeProvider>())
+                : new SecretStore(null, null, sources: sp.GetServices<ISecretSource>(), options: options));
+            services.AddHostedService<SecretsStartup>();
+        }
+        configure?.Invoke(options);
+        return services;
+    }
+
+    /// <summary>
+    /// Lets references read from <typeparamref name="T"/> (a source package's <c>AddWincheSecrets…()</c> calls this).
+    /// Adds the secret store too. A source registered twice by name: the last one counts.
+    /// </summary>
+    public static IServiceCollection AddWincheSecretSource<T>(this IServiceCollection services) where T : class, ISecretSource
+    {
+        services.AddWincheSecrets();
+        if (!services.Any(d => d.ServiceType == typeof(ISecretSource) && d.ImplementationType == typeof(T)))
+            services.AddSingleton<ISecretSource, T>();
         return services;
     }
 }
@@ -38,6 +57,12 @@ internal sealed class SecretsStartup(SecretStore secrets, IServiceProvider servi
               set_at timestamptz NOT NULL,
               set_by text NULL
             );
+        """,
+        // References: a row is a value (ciphertext) or where to read one (reference).
+        """
+            ALTER TABLE winche_secrets ALTER COLUMN ciphertext DROP NOT NULL;
+            ALTER TABLE winche_secrets ADD COLUMN IF NOT EXISTS reference text NULL;
+            ALTER TABLE winche_secrets ADD COLUMN IF NOT EXISTS app_credentials boolean NOT NULL DEFAULT false;
         """,
     ];
 
