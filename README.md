@@ -11,6 +11,19 @@ storage bucket's, functions' own). Each is either:
 Code reads either the same way: `await secrets.GetAsync("smtp.password")`. The console sets, replaces and removes
 secrets; it never reads them back.
 
+## Install
+
+```sh
+dotnet add package Winche.Secrets
+dotnet add package Winche.Secrets.Aws   # references to AWS Secrets Manager and Parameter Store
+```
+
+Winche.Auth, Winche.Storage, Winche.Webhooks, Winche.Assets and Winche.Functions depend on Winche.Secrets and add the
+store themselves, so an app using them already has it: add it yourself to keep secrets of your own, or for the AWS
+sources. It keeps secrets where Winche.Core keeps settings (`AddWincheConfig`, with a master key).
+
+## Use
+
 ```csharp
 builder.Services.AddWincheConfig(o => { o.ConnectionString = conn; o.MasterKey = config["Winche:MasterKey"]; });
 builder.Services.AddWincheSecrets(o => o.CacheFor = TimeSpan.FromMinutes(5));   // packages that keep secrets add it themselves too

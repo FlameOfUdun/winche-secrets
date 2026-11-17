@@ -1,0 +1,59 @@
+name: Publish
+
+# Push a tag v<version> (the <Version> in the projects, e.g. v2.0.1) to publish Winche.Secrets and Winche.Secrets.Aws to
+# nuget.org. They depend on Winche.Core through nuget.org, so release in order: Winche.Core, then Winche.Secrets, then
+# the packages that keep secrets (Winche.Auth, Winche.Storage, Winche.Webhooks, Winche.Assets, Winche.Functions).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write   # NuGet trusted publishing (OIDC): no API key is stored
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: The tag matches the version
+        run: |
+          version=$(dotnet msbuild src/Winche.Secrets/Winche.Secrets.csproj -getProperty:Version)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the version in the projects ($version)."
+            exit 1
+          fi
+
+      - name: Restore
+        run: dotnet restore Winche.Secrets.slnx
+
+      - name: Build
+        run: dotnet build Winche.Secrets.slnx -c Release --no-restore
+
+      # Tests use PostgreSQL and LocalStack in Docker (Testcontainers), which GitHub's Ubuntu runners have.
+      - name: Test
+        run: dotnet test Winche.Secrets.slnx -c Release --no-build
+
+      - name: Pack
+        run: |
+          dotnet pack src/Winche.Secrets/Winche.Secrets.csproj -c Release --no-build -o ./packages
+          dotnet pack src/Winche.Secrets.Aws/Winche.Secrets.Aws.csproj -c Release --no-build -o ./packages
+
+      # Exchange the GitHub OIDC token for a short-lived NuGet.org API key.
+      - name: NuGet login (trusted publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: FlameOfUdun
+
+      - name: Push
+        run: dotnet nuget push ./packages/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
